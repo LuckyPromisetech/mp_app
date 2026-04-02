@@ -2,147 +2,345 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-class OrderScreen extends StatefulWidget {
+class OrderScreen extends StatelessWidget {
   const OrderScreen({Key? key}) : super(key: key);
 
-  @override
-  State<OrderScreen> createState() => _OrderScreenState();
-}
-
-class _OrderScreenState extends State<OrderScreen> {
-  final FirebaseFirestore firestore = FirebaseFirestore.instance;
-  final FirebaseAuth auth = FirebaseAuth.instance;
-
-  bool _isLoading = true;
-  List<Map<String, dynamic>> _orders = [];
-
-  @override
-  void initState() {
-    super.initState();
-    fetchOrders();
-  }
-
-  Future<void> fetchOrders() async {
-    setState(() => _isLoading = true);
-
-    final user = auth.currentUser;
-    if (user == null) {
-      setState(() {
-        _orders = [];
-        _isLoading = false;
-      });
-      return;
-    }
-
-    try {
-      // Fetch buyer's orders
-      final orderSnapshots = await firestore
-          .collection('orders')
-          .where('buyer_id', isEqualTo: user.uid)
-          .orderBy('created_at', descending: true)
-          .get();
-
-      List<Map<String, dynamic>> buyerOrders = [];
-
-      for (var orderDoc in orderSnapshots.docs) {
-        final orderData = orderDoc.data();
-        final itemsSnapshot = await firestore
-            .collection('orders')
-            .doc(orderDoc.id)
-            .collection('order_items')
-            .get();
-
-        buyerOrders.add({
-          'order_id': orderDoc.id,
-          'total_price': orderData['total_price'] ?? 0.0,
-          'status': orderData['status'] ?? 'pending',
-          'items': itemsSnapshot.docs.map((doc) => doc.data()).toList(),
-          'created_at': orderData['created_at'],
-        });
-      }
-
-      setState(() {
-        _orders = buyerOrders;
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('Error fetching buyer orders: $e');
-      setState(() {
-        _orders = [];
-        _isLoading = false;
-      });
-    }
-  }
+  static const Color kOrange = Colors.orange;
+  static const Color kNavy = Color(0xFF0A1D37);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('My Orders')),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _orders.isEmpty
-          ? const Center(
-              child: Text(
-                'You have no orders yet',
-                style: TextStyle(fontSize: 18),
-              ),
-            )
-          : ListView.builder(
-              itemCount: _orders.length,
-              itemBuilder: (context, index) {
-                final order = _orders[index];
-                final status = order['status'] as String;
-                final items = order['items'] as List<dynamic>;
+    final user = FirebaseAuth.instance.currentUser;
 
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
+    if (user == null) {
+      return const Scaffold(body: Center(child: Text("User not logged in")));
+    }
+
+    return Scaffold(
+      backgroundColor: kOrange,
+      appBar: AppBar(
+        backgroundColor: kNavy,
+        title: const Text("My Orders", style: TextStyle(color: kOrange)),
+        iconTheme: const IconThemeData(color: kOrange),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        // 🔑 Stream only for orders where buyerId matches
+        stream: FirebaseFirestore.instance
+            .collection('orders')
+            .where('buyerId', isEqualTo: user.uid)
+            .orderBy('createdAt', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(child: Text("Error: ${snapshot.error}"));
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text(
+                "No orders yet",
+                style: TextStyle(color: Colors.white),
+              ),
+            );
+          }
+
+          // 🔹 Client-side filtering to avoid disappearing orders due to status
+          final allOrders = snapshot.data!.docs;
+          final orders = allOrders
+              .map((doc) => doc.data() as Map<String, dynamic>)
+              .toList();
+
+          return ListView.builder(
+            itemCount: allOrders.length,
+            itemBuilder: (context, index) {
+              final orderDoc = allOrders[index];
+              final data = orderDoc.data() as Map<String, dynamic>;
+
+              final items = data['items'] ?? [];
+              final total = (data['totalPrice'] ?? 0).toDouble();
+              final status = data['status'] ?? 'pending';
+              final address = data['address'] ?? '';
+              final cancelReason = data['cancelReason'] ?? '';
+              final paidNow = (data['paidNow'] ?? 0).toDouble();
+              final payLater = (data['payOnDelivery'] ?? 0).toDouble();
+              final paymentType = data['paymentType'] ?? "full";
+              final returnRequested = data['returnRequested'] ?? false;
+              final sellerMessage = data['sellerMessage'] ?? '';
+
+              Timestamp? timestamp = data['createdAt'];
+              String dateText = timestamp != null
+                  ? timestamp.toDate().toString()
+                  : "Processing...";
+
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: kNavy,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ExpansionTile(
+                  iconColor: kOrange,
+                  collapsedIconColor: kOrange,
+                  title: Text(
+                    "Order #${orderDoc.id.substring(0, 6)}",
+                    style: const TextStyle(color: kOrange),
                   ),
-                  child: ExpansionTile(
-                    title: Text('Order #${order['order_id']}'),
-                    subtitle: Text(
-                      'Total: ₦${(order['total_price'] ?? 0).toStringAsFixed(0)}',
-                    ),
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: status == 'pending'
-                            ? Colors.orange
-                            : Colors.green,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        status.toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    children: items.map((item) {
-                      return ListTile(
-                        leading: Image.network(
-                          item['image_url'] ?? '',
-                          width: 50,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const Icon(Icons.image_not_supported),
-                        ),
-                        title: Text(item['title'] ?? ''),
-                        subtitle: Text('Quantity: ${item['quantity'] ?? 1}'),
-                        trailing: Text(
-                          '₦${(item['price'] ?? 0).toStringAsFixed(0)}',
-                        ),
-                      );
-                    }).toList(),
+                  subtitle: Text(
+                    "Status: ${status.toUpperCase()}",
+                    style: const TextStyle(color: Colors.white70),
                   ),
-                );
-              },
-            ),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Date: $dateText",
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            "Address: $address",
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          if (cancelReason.isNotEmpty)
+                            Text(
+                              "Seller Response: $cancelReason",
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          if (sellerMessage.isNotEmpty)
+                            Text(
+                              "Seller Message: $sellerMessage",
+                              style: const TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          const SizedBox(height: 10),
+
+                          // 🔹 ITEMS
+                          const Text(
+                            "Items:",
+                            style: TextStyle(
+                              color: kOrange,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          ...items.map<Widget>((item) {
+                            final price = (item['price'] ?? 0).toDouble();
+                            final qty = item['quantity'] ?? 1;
+                            return ListTile(
+                              title: Text(
+                                item['title'] ?? '',
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              subtitle: Text(
+                                "Qty: $qty",
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              trailing: Text(
+                                "₦${(price * qty).toStringAsFixed(0)}",
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            );
+                          }).toList(),
+
+                          const SizedBox(height: 10),
+
+                          // 🔹 TOTAL
+                          Text(
+                            "Total: ₦${total.toStringAsFixed(0)}",
+                            style: const TextStyle(
+                              color: kOrange,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // 🔹 HALF PAYMENT INFO
+                          if (paymentType == "half" && payLater > 0)
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                "Remaining Payment: ₦${payLater.toStringAsFixed(0)}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 10),
+
+                          // 🔹 ACTION BUTTONS
+                          Row(
+                            children: [
+                              // MAIN BUTTON
+                              Expanded(
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: kOrange,
+                                  ),
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) {
+                                        final TextEditingController reviewCtrl =
+                                            TextEditingController();
+                                        return AlertDialog(
+                                          title: const Text("Confirm Delivery"),
+                                          content: TextField(
+                                            controller: reviewCtrl,
+                                            maxLines: 3,
+                                            decoration: const InputDecoration(
+                                              hintText: "Leave a review",
+                                            ),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () {
+                                                Navigator.of(ctx).pop();
+                                              },
+                                              child: const Text("Cancel"),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: () async {
+                                                await FirebaseFirestore.instance
+                                                    .collection("orders")
+                                                    .doc(orderDoc.id)
+                                                    .update({
+                                                      "status": "completed",
+                                                      "buyerReview": reviewCtrl
+                                                          .text
+                                                          .trim(),
+                                                    });
+                                                Navigator.of(ctx).pop();
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      "Order marked as received ✅",
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                              child: const Text("Submit"),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  },
+                                  child: Text(
+                                    paymentType == "half" && payLater > 0
+                                        ? "Pay Remaining"
+                                        : "Item Received",
+                                    style: const TextStyle(color: kNavy),
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(width: 10),
+
+                              // REQUEST RETURN BUTTON
+                              Expanded(
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+                                  onPressed: returnRequested
+                                      ? null
+                                      : () {
+                                          showDialog(
+                                            context: context,
+                                            builder: (ctx) {
+                                              final TextEditingController
+                                              reasonCtrl =
+                                                  TextEditingController();
+                                              return AlertDialog(
+                                                title: const Text(
+                                                  "Request Return",
+                                                ),
+                                                content: TextField(
+                                                  controller: reasonCtrl,
+                                                  maxLines: 3,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        hintText:
+                                                            "Reason for return",
+                                                      ),
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () {
+                                                      Navigator.of(ctx).pop();
+                                                    },
+                                                    child: const Text("Cancel"),
+                                                  ),
+                                                  ElevatedButton(
+                                                    onPressed: () async {
+                                                      await FirebaseFirestore
+                                                          .instance
+                                                          .collection("orders")
+                                                          .doc(orderDoc.id)
+                                                          .update({
+                                                            "returnRequested":
+                                                                true,
+                                                            "returnReason":
+                                                                reasonCtrl.text
+                                                                    .trim(),
+                                                            "status":
+                                                                "return_requested",
+                                                          });
+                                                      Navigator.of(ctx).pop();
+                                                      ScaffoldMessenger.of(
+                                                        context,
+                                                      ).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            "Return request sent",
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                    child: const Text("Send"),
+                                                  ),
+                                                ],
+                                              );
+                                            },
+                                          );
+                                        },
+                                  child: Text(
+                                    returnRequested
+                                        ? "Return Requested"
+                                        : "Request Return",
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }

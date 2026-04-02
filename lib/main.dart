@@ -1,226 +1,60 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:provider/provider.dart' as flutter_provider;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
 
-import '../models/products_model.dart';
-import '../screens/product_detail_screen.dart';
-import '../screens/seller_screen.dart';
-import '../screens/seller_login.dart';
-import '../screens/seller_signup.dart';
-import '../screens/cart_screen.dart';
-import '../screens/order_screen.dart';
-import '../provider/cart_provider.dart';
+import 'provider/cart_provider.dart';
+import 'screens/user_wrapper.dart';
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  // Load environment variables
+  try {
+    await dotenv.load(fileName: ".env");
+    print("✅ .env loaded successfully");
+  } catch (e) {
+    print("❌ Error loading .env: $e");
+  }
+
+  // Initialize Firebase
+  if (kIsWeb) {
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: "AIzaSyB-_diQZ2QhSWqT6p5Ip_G03nM4_4cKYsg",
+        authDomain: "mp-app-b9dcf.firebaseapp.com",
+        projectId: "mp-app-b9dcf",
+        storageBucket: "mp-app-b9dcf.appspot.com",
+        messagingSenderId: "388466903099",
+        appId: "1:388466903099:web:7f524eba1d0396765e341e",
+        measurementId: "G-W3TCP0NRD3",
+      ),
+    );
+  } else {
+    await Firebase.initializeApp();
+  }
+
+  runApp(const MyApp());
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  final FirebaseFirestore firestore = FirebaseFirestore.instance;
-  final FirebaseAuth auth = FirebaseAuth.instance;
-
-  List<Product> products = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchProducts();
-  }
-
-  // ✅ FETCH PRODUCTS FROM FIRESTORE
-  Future<void> _fetchProducts() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final snapshot = await firestore.collection('products').get();
-
-      setState(() {
-        products = snapshot.docs
-            .map((doc) => Product.fromMap(doc.data()))
-            .toList();
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('Fetch error: $e');
-      setState(() => _isLoading = false);
-    }
-  }
-
-  // ✅ REAL SELLER FLOW
-  Future<void> _openSellerFlow() async {
-    final user = auth.currentUser;
-
-    // 1️⃣ Not logged in → Go to seller login
-    if (user == null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const SellerLoginScreen()),
-      );
-      return;
-    }
-
-    try {
-      // 2️⃣ Check if seller profile exists
-      final sellerDoc = await firestore
-          .collection('sellers')
-          .doc(user.uid)
-          .get();
-
-      if (!sellerDoc.exists) {
-        // No seller profile → Go to seller sign up
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const SellerSignUpScreen()),
-        );
-      } else {
-        // Seller exists → Go to Seller Dashboard
-        final data = sellerDoc.data()!;
-
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => SellerScreen(
-              profileName: data['email'] ?? '',
-              shopName: data['shopName'] ?? '',
-              shopDetails: data['shopDetails'] ?? '',
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint("Seller flow error: $e");
-    }
-  }
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final cart = flutter_provider.Provider.of<CartProvider>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Home'),
-        actions: [
-          // 🛒 CART BUTTON
-          Stack(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.shopping_cart),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const CartScreen()),
-                  );
-                },
-              ),
-              if (cart.items.isNotEmpty)
-                Positioned(
-                  right: 4,
-                  top: 4,
-                  child: CircleAvatar(
-                    radius: 8,
-                    backgroundColor: Colors.red,
-                    child: Text(
-                      cart.items.length.toString(),
-                      style: const TextStyle(fontSize: 10, color: Colors.white),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-
-          // 📦 ORDERS BUTTON
-          IconButton(
-            icon: const Icon(Icons.receipt_long),
-            tooltip: 'Orders',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const OrderScreen()),
-              );
-            },
-          ),
-
-          // 🏪 SELLER BUTTON
-          IconButton(
-            icon: const Icon(Icons.store),
-            tooltip: 'Seller',
-            onPressed: _openSellerFlow,
-          ),
-        ],
+    return MultiProvider(
+      providers: [ChangeNotifierProvider(create: (_) => CartProvider())],
+      child: MaterialApp(
+        title: 'MP Marketplace',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          primarySwatch: Colors.green,
+          useMaterial3: true,
+          fontFamily: 'Arial',
+        ),
+        home: const UserWrapper(),
       ),
-
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : products.isEmpty
-          ? const Center(child: Text('No products found.'))
-          : RefreshIndicator(
-              onRefresh: _fetchProducts,
-              child: GridView.builder(
-                padding: const EdgeInsets.all(8),
-                itemCount: products.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 0.7,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                ),
-                itemBuilder: (context, index) {
-                  final product = products[index];
-
-                  return Card(
-                    elevation: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: product.imageUrl.isNotEmpty
-                              ? Image.network(
-                                  product.imageUrl,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Icon(Icons.image);
-                                  },
-                                )
-                              : const Icon(Icons.image),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.all(6),
-                          child: Text(
-                            product.title,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Text(
-                            '₦${product.price}',
-                            style: const TextStyle(color: Colors.green),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    ProductDetailScreen(product: product),
-                              ),
-                            );
-                          },
-                          child: const Text("View"),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
     );
   }
 }

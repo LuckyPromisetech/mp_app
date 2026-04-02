@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "388466903099",
+    "project_id": "mp-app-b9dcf",
+    "storage_bucket": "mp-app-b9dcf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:388466903099:android:15038aaa49b708b95e341e",
+        "android_client_info": {
+          "package_name": "com.example.mp_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB74Mbyh1157FhQRavnDMJ2gpKaGtc_288"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

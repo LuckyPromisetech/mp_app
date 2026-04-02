@@ -1,77 +1,64 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart' as flutter_provider;
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-import '../models/products_model.dart';
 import '../provider/cart_provider.dart';
 import 'order_summary_screen.dart';
-import 'product_detail_screen.dart';
 
-class CartScreen extends StatelessWidget {
+class CartScreen extends StatefulWidget {
   const CartScreen({Key? key}) : super(key: key);
 
-  Future<void> createOrder(BuildContext context) async {
-    final cart = flutter_provider.Provider.of<CartProvider>(
-      context,
-      listen: false,
-    );
-    final user = FirebaseAuth.instance.currentUser;
+  @override
+  State<CartScreen> createState() => _CartScreenState();
+}
 
-    if (user == null) return;
+class _CartScreenState extends State<CartScreen> {
+  final user = FirebaseAuth.instance.currentUser;
+  bool _isLoading = false;
 
-    final firestore = FirebaseFirestore.instance;
+  final Color orange = const Color(0xFFFF8C00);
+  final Color navy = const Color(0xFF0A1D37);
 
-    try {
-      // 1️⃣ Create order document
-      final orderRef = await firestore.collection('orders').add({
-        'buyer_id': user.uid,
-        'total_price': cart.totalPrice,
-        'created_at': FieldValue.serverTimestamp(),
-      });
-
-      // 2️⃣ Add order items subcollection
-      final batch = firestore.batch();
-      for (var product in cart.items) {
-        final itemRef = orderRef.collection('order_items').doc();
-        batch.set(itemRef, {
-          'product_id': product.id,
-          'title': product.title,
-          'price': product.price,
-          'quantity': product.quantity,
-          'image_url': product.imageUrl,
-        });
-      }
-      await batch.commit();
-
-      // 3️⃣ Clear cart
-      cart.clearCart();
-
-      // 4️⃣ Navigate to summary screen
-      if (context.mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const OrderSummaryScreen()),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error creating order: $e')));
-      }
+  @override
+  void initState() {
+    super.initState();
+    if (user != null) {
+      Provider.of<CartProvider>(
+        context,
+        listen: false,
+      ).loadCartFromFirestore(user!.uid);
     }
+  }
+
+  void _goToOrderSummary() {
+    final cart = Provider.of<CartProvider>(context, listen: false);
+    if (cart.items.isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const OrderSummaryScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cart = flutter_provider.Provider.of<CartProvider>(context);
+    final cart = Provider.of<CartProvider>(context);
+
+    // ----------------- TOTAL PRICE -----------------
+    double totalPrice = cart.totalPrice;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Your Cart')),
+      backgroundColor: orange,
+      appBar: AppBar(
+        backgroundColor: navy,
+        iconTheme: IconThemeData(color: orange),
+        title: Text('Your Cart', style: TextStyle(color: orange)),
+      ),
       body: cart.items.isEmpty
           ? const Center(
-              child: Text('Your cart is empty', style: TextStyle(fontSize: 18)),
+              child: Text(
+                'Your cart is empty',
+                style: TextStyle(fontSize: 18, color: Colors.white),
+              ),
             )
           : Column(
               children: [
@@ -79,79 +66,198 @@ class CartScreen extends StatelessWidget {
                   child: ListView.builder(
                     itemCount: cart.items.length,
                     itemBuilder: (context, index) {
-                      final product = cart.items[index];
+                      final cartItem = cart.items[index];
+                      final product = cartItem.product;
+
+                      String image = product.images.isNotEmpty
+                          ? product.images.first
+                          : product.imageUrl;
+
+                      final discount = cartItem.discount;
+                      final effectivePrice =
+                          product.price * (1 - discount / 100);
+                      final itemDelivery =
+                          cartItem.deliveryPrice * cartItem.quantity;
+                      final itemTotal =
+                          (effectivePrice * cartItem.quantity) + itemDelivery;
 
                       return Card(
+                        color: navy,
                         margin: const EdgeInsets.symmetric(
                           horizontal: 10,
-                          vertical: 5,
+                          vertical: 6,
                         ),
-                        child: ListTile(
-                          leading: Image.network(
-                            product.imageUrl,
-                            width: 50,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                Container(
-                                  width: 50,
-                                  color: Colors.grey.shade300,
-                                  child: const Icon(Icons.image_not_supported),
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Row(
+                            children: [
+                              // IMAGE
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  image,
+                                  width: 70,
+                                  height: 70,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      Container(
+                                        width: 70,
+                                        height: 70,
+                                        color: Colors.grey.shade300,
+                                        child: const Icon(Icons.image),
+                                      ),
                                 ),
-                          ),
-                          title: Text(product.title),
-                          subtitle: Text(
-                            '₦${product.price.toStringAsFixed(0)}',
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              cart.removeFromCart(product);
-                            },
-                          ),
-                          onTap: () {
-                            // Go back to Product Detail
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    ProductDetailScreen(product: product),
                               ),
-                            );
-                          },
+                              const SizedBox(width: 10),
+
+                              // DETAILS
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      product.title,
+                                      style: TextStyle(
+                                        color: orange,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '₦${effectivePrice.toStringAsFixed(0)}',
+                                      style: TextStyle(
+                                        color: orange,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Delivery: ₦${itemDelivery.toStringAsFixed(0)}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Item Total: ₦${itemTotal.toStringAsFixed(0)}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+
+                                    // QUANTITY CONTROLS
+                                    Row(
+                                      children: [
+                                        IconButton(
+                                          color: orange,
+                                          icon: const Icon(Icons.remove_circle),
+                                          onPressed: () {
+                                            if (user != null) {
+                                              cart.decreaseQuantity(
+                                                product.id,
+                                                user!.uid,
+                                              );
+                                            }
+                                          },
+                                        ),
+                                        Text(
+                                          cartItem.quantity.toString(),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          color: orange,
+                                          icon: const Icon(Icons.add_circle),
+                                          onPressed: () {
+                                            if (user != null) {
+                                              cart.increaseQuantity(
+                                                product.id,
+                                                user!.uid,
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // DELETE BUTTON
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.red,
+                                ),
+                                onPressed: () {
+                                  if (user != null) {
+                                    cart.removeFromCart(product.id, user!.uid);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
+
+                // TOTAL PRICE SECTION
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: orange,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
+                  ),
                   child: Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'Total:',
+                          Text(
+                            'Total Price:',
                             style: TextStyle(
                               fontSize: 18,
+                              color: navy,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                           Text(
-                            '₦${cart.totalPrice.toStringAsFixed(0)}',
+                            '₦${totalPrice.toStringAsFixed(0)}',
                             style: const TextStyle(
+                              color: Colors.white,
                               fontSize: 18,
-                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 15),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: () => createOrder(context),
-                          child: const Text('Place Order'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: navy,
+                          ),
+                          onPressed: _isLoading ? null : _goToOrderSummary,
+                          child: _isLoading
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                )
+                              : Text(
+                                  'Place Order',
+                                  style: TextStyle(
+                                    color: orange,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
                       ),
                     ],
