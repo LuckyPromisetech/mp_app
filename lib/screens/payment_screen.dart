@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:flutterwave_standard/flutterwave.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
@@ -34,17 +33,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _isLoading = false;
   String paymentType = "full";
 
-  final String _publicKey = "FLWPUBK_TEST-d3d58cfbfa6f5934baa6f7ca9fb79b18-X";
+  double getPayNowAmount(double items, double delivery) =>
+      paymentType == "half" ? (items / 2) + delivery : items + delivery;
 
-  double getPayNowAmount(double items, double delivery) {
-    return paymentType == "half" ? (items / 2) + delivery : items + delivery;
-  }
+  double getPayLaterAmount(double items) =>
+      paymentType == "half" ? items / 2 : 0;
 
-  double getPayLaterAmount(double items) {
-    return paymentType == "half" ? items / 2 : 0;
-  }
-
-  /// 🔗 NEW: Hosted Link Payment via Railway backend
   Future<void> payWithHostedLink(double amount) async {
     setState(() => _isLoading = true);
 
@@ -52,10 +46,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception("User not logged in");
 
-      String? backendUrl = dotenv.env['BACKEND_URL'];
-      backendUrl ??= "https://edgebaz-production.up.railway.app";
-
-      print("🌐 Backend URL: $backendUrl");
+      String backendUrl =
+          dotenv.env['BACKEND_URL'] ??
+          "https://edgebaz-production.up.railway.app";
 
       final txRef = "TX_${DateTime.now().millisecondsSinceEpoch}";
 
@@ -73,12 +66,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
       final data = jsonDecode(response.body);
 
-      if (data['status'] == 'success') {
+      if (data['status'] == 'success' && data['data'] != null) {
         final link = data['data']['link'];
-        print("🔥 Payment Link: $link");
-
-        // Launch link in browser
         final uri = Uri.parse(link);
+
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else {
@@ -129,13 +120,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  /// 🛒 ITEMS
+                  // ITEMS
                   Expanded(
                     child: ListView.builder(
                       itemCount: cartProvider.items.length,
                       itemBuilder: (context, index) {
                         final item = cartProvider.items[index];
-
                         final discount = item.product.discount ?? 0;
                         final effectivePrice =
                             item.product.price *
@@ -173,7 +163,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   const SizedBox(height: 10),
 
-                  /// 📦 ADDRESS + BUYER INFO
+                  // ADDRESS + BUYER INFO
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
@@ -194,7 +184,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   const SizedBox(height: 16),
 
-                  /// 💳 PAYMENT TYPE
+                  // PAYMENT TYPE
                   Row(
                     children: [
                       Expanded(
@@ -224,7 +214,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ],
                   ),
 
-                  /// 💰 BREAKDOWN
+                  // BREAKDOWN
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -244,7 +234,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   const SizedBox(height: 16),
 
-                  /// 💳 PAY BUTTON (Both Flutterwave & Hosted Link)
+                  // PAY BUTTON
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -254,108 +244,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       ),
                       onPressed: _isLoading
                           ? null
-                          : () async {
-                              // 🔥 Choose which payment to use
-                              // Example: Uncomment one:
-                              // await payWithHostedLink(payNow); // Railway backend
-                              // OR keep original Flutterwave code below
-
-                              setState(() => _isLoading = true);
-
-                              try {
-                                final user = FirebaseAuth.instance.currentUser;
-
-                                if (user == null) {
-                                  throw Exception("User not logged in");
-                                }
-
-                                // ORIGINAL FLUTTERWAVE PAYMENT
-                                final Customer customer = Customer(
-                                  name: widget.buyerName,
-                                  email: user.email ?? "test@gmail.com",
-                                  phoneNumber: widget.buyerPhone,
-                                );
-
-                                final Flutterwave flutterwave = Flutterwave(
-                                  publicKey: _publicKey,
-                                  currency: "NGN",
-                                  txRef:
-                                      "MP_${DateTime.now().millisecondsSinceEpoch}",
-                                  amount: payNow.toStringAsFixed(2),
-                                  customer: customer,
-                                  paymentOptions: "card, ussd, banktransfer",
-                                  customization: Customization(
-                                    title: "EdgeBaz",
-                                    description: "Order Payment",
-                                  ),
-                                  redirectUrl: "https://google.com",
-                                  isTestMode: true,
-                                );
-
-                                final response = await flutterwave.charge(
-                                  context,
-                                );
-
-                                if (response != null &&
-                                    response.success == true) {
-                                  await FirebaseFirestore.instance
-                                      .collection("orders")
-                                      .add({
-                                        "buyerId": user.uid,
-                                        "buyerName": widget.buyerName,
-                                        "buyerPhone": widget.buyerPhone,
-                                        "sellerId": cartProvider
-                                            .items
-                                            .first
-                                            .product
-                                            .sellerId,
-                                        "items": cartProvider.items.map((e) {
-                                          final discount =
-                                              e.product.discount ?? 0;
-                                          final effectivePrice =
-                                              e.product.price *
-                                              (1 - (discount.toDouble() / 100));
-
-                                          return {
-                                            "title": e.product.title,
-                                            "price": effectivePrice,
-                                            "quantity": e.quantity,
-                                            "image": e.product.imageUrl,
-                                          };
-                                        }).toList(),
-                                        "totalPrice": widget.totalAmount,
-                                        "paidNow": payNow,
-                                        "payOnDelivery": payLater,
-                                        "paymentType": paymentType,
-                                        "address": widget.deliveryAddress,
-                                        "status": "pending",
-                                        "createdAt":
-                                            FieldValue.serverTimestamp(),
-                                      });
-
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text("Payment Successful 🎉"),
-                                    ),
-                                  );
-
-                                  cartProvider.clearCart();
-
-                                  Navigator.popUntil(
-                                    context,
-                                    (route) => route.isFirst,
-                                  );
-                                } else {
-                                  throw Exception("Payment Failed");
-                                }
-                              } catch (e) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(e.toString())),
-                                );
-                              }
-
-                              setState(() => _isLoading = false);
-                            },
+                          : () => payWithHostedLink(payNow),
                       child: _isLoading
                           ? const CircularProgressIndicator(
                               color: Colors.orange,
