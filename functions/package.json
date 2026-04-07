@@ -1,0 +1,20 @@
+{
+  "name": "edgebaz-backend",
+  "version": "1.0.0",
+  "description": "EdgeBaz Backend API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.6.0"
+  }
+}

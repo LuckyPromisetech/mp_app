@@ -3,7 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class VerifyAccountScreen extends StatefulWidget {
-  const VerifyAccountScreen({Key? key}) : super(key: key);
+  final double? amount;
+  final bool isWithdraw;
+
+  const VerifyAccountScreen({Key? key, this.amount, this.isWithdraw = false})
+    : super(key: key);
 
   @override
   State<VerifyAccountScreen> createState() => _VerifyAccountScreenState();
@@ -79,13 +83,12 @@ class _VerifyAccountScreenState extends State<VerifyAccountScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Account details saved successfully!')),
+        const SnackBar(content: Text('Account saved successfully!')),
       );
     } catch (e) {
-      debugPrint('Error saving account: $e');
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Failed to save account.')));
+      ).showSnackBar(const SnackBar(content: Text('Failed to save account')));
     } finally {
       setState(() => _isLoading = false);
     }
@@ -95,6 +98,22 @@ class _VerifyAccountScreenState extends State<VerifyAccountScreen> {
     setState(() {
       _isEditing = true;
     });
+  }
+
+  // 🔥 WITHDRAW FUNCTION
+  void _processWithdraw() {
+    final amount = widget.amount;
+
+    if (amount == null || _currentAccount == null) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Processing ₦$amount withdrawal...")),
+    );
+
+    // 👉 NEXT: Connect backend here
+    print("Withdraw ₦$amount to ${_currentAccount!['accountNumber']}");
+
+    Navigator.pop(context);
   }
 
   @override
@@ -108,193 +127,215 @@ class _VerifyAccountScreenState extends State<VerifyAccountScreen> {
       appBar: AppBar(
         backgroundColor: kCardColor,
         iconTheme: const IconThemeData(color: kBackgroundColor),
-        title: const Text(
-          'Verify Account',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        title: Text(
+          widget.isWithdraw ? 'Withdraw' : 'Verify Account',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _hasAccount && !_isEditing
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            : Column(
                 children: [
-                  const Text(
-                    'Verified Account:',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
+                  // 💰 SHOW WITHDRAW AMOUNT
+                  if (widget.isWithdraw && widget.amount != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: kBackgroundColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        "Withdraw ₦${widget.amount}",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: kCardColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+
+                  Expanded(
+                    child: _hasAccount && !_isEditing
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Verified Account:',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+
+                              Card(
+                                color: kCardColor,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Account Name: ${_currentAccount!['accountName']}',
+                                              style: const TextStyle(
+                                                color: kTextColor,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Account Number: ${_currentAccount!['accountNumber']}',
+                                              style: const TextStyle(
+                                                color: kTextColor,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Bank: ${_currentAccount!['bankName']}',
+                                              style: const TextStyle(
+                                                color: kTextColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+
+                                      Column(
+                                        children: [
+                                          const Icon(
+                                            Icons.verified,
+                                            color: Colors.greenAccent,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: kBackgroundColor,
+                                            ),
+                                            onPressed: _enableEditing,
+                                            child: const Text("Change"),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(height: 20),
+
+                              // 🔥 WITHDRAW BUTTON
+                              if (widget.isWithdraw)
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: kBackgroundColor,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 15,
+                                      ),
+                                    ),
+                                    onPressed: _processWithdraw,
+                                    child: const Text(
+                                      "Withdraw Now",
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          )
+                        : Form(
+                            key: _formKey,
+                            child: ListView(
                               children: [
-                                Text(
-                                  'Account Name: ${_currentAccount!['accountName']}',
-                                  style: const TextStyle(
-                                    color: kTextColor,
-                                    fontSize: 14,
+                                TextFormField(
+                                  controller: _accountNameController,
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    labelText: 'Account Name',
+                                    labelStyle: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: kTextColor,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
+                                  validator: (value) =>
+                                      value!.isEmpty ? 'Enter name' : null,
                                 ),
-                                Text(
-                                  'Account Number: ${_currentAccount!['accountNumber']}',
-                                  style: const TextStyle(
-                                    color: kTextColor,
-                                    fontSize: 14,
+
+                                const SizedBox(height: 16),
+
+                                TextFormField(
+                                  controller: _accountNumberController,
+                                  style: const TextStyle(color: Colors.white),
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: 'Account Number',
+                                    labelStyle: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: kTextColor,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
+                                  validator: (value) =>
+                                      value!.isEmpty ? 'Enter number' : null,
                                 ),
-                                Text(
-                                  'Bank: ${_currentAccount!['bankName']}',
-                                  style: const TextStyle(
-                                    color: kTextColor,
-                                    fontSize: 14,
+
+                                const SizedBox(height: 16),
+
+                                TextFormField(
+                                  controller: _bankNameController,
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    labelText: 'Bank Name',
+                                    labelStyle: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: kTextColor,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
+                                  validator: (value) =>
+                                      value!.isEmpty ? 'Enter bank' : null,
+                                ),
+
+                                const SizedBox(height: 24),
+
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: kBackgroundColor,
+                                  ),
+                                  onPressed: _saveAccount,
+                                  child: const Text("Save Account"),
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Column(
-                            children: [
-                              Icon(
-                                Icons.verified,
-                                color: Colors.greenAccent,
-                                size: 28,
-                              ),
-                              const SizedBox(height: 8),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: kBackgroundColor,
-                                ),
-                                onPressed: _enableEditing,
-                                child: const Text(
-                                  'Change',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ],
-              )
-            : Form(
-                key: _formKey,
-                child: ListView(
-                  children: [
-                    TextFormField(
-                      controller: _accountNameController,
-                      style: const TextStyle(color: Colors.white),
-                      readOnly: !_isEditing && _hasAccount,
-                      decoration: InputDecoration(
-                        labelText: 'Account Name',
-                        labelStyle: const TextStyle(color: Colors.white70),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: kTextColor),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: kBackgroundColor),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Enter account name';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _accountNumberController,
-                      style: const TextStyle(color: Colors.white),
-                      readOnly: !_isEditing && _hasAccount,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: 'Account Number',
-                        labelStyle: const TextStyle(color: Colors.white70),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: kTextColor),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: kBackgroundColor),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Enter account number';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _bankNameController,
-                      style: const TextStyle(color: Colors.white),
-                      readOnly: !_isEditing && _hasAccount,
-                      decoration: InputDecoration(
-                        labelText: 'Bank Name',
-                        labelStyle: const TextStyle(color: Colors.white70),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: kTextColor),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: kBackgroundColor),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Enter bank name';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kBackgroundColor,
-                        minimumSize: const Size(double.infinity, 48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: _saveAccount,
-                      child: const Text(
-                        'Save Account',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
               ),
       ),
     );

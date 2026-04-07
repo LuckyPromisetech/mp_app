@@ -20,6 +20,8 @@ import '../screens/verify_account_screen.dart';
 import '../screens/edit_seller_account_screen.dart';
 import 'verify_location_screen.dart';
 import 'seller_profile_screen.dart';
+import 'payment_webview_screen.dart';
+import 'wallet_screen.dart';
 
 class SellerScreen extends StatefulWidget {
   final String profileName;
@@ -54,6 +56,8 @@ class _SellerScreenState extends State<SellerScreen> {
 
   bool _menuOpen = false;
 
+  get result => null;
+
   @override
   void initState() {
     super.initState();
@@ -75,11 +79,9 @@ class _SellerScreenState extends State<SellerScreen> {
     }
   }
 
-  // promote model
   void _openPromoteModal(Map<String, dynamic> product) {
     int selectedDuration = 1;
     double discount = 0.0;
-
     final TextEditingController discountController = TextEditingController();
 
     showDialog(
@@ -97,21 +99,27 @@ class _SellerScreenState extends State<SellerScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Product Title
                     Text(
                       product['title'] ?? '',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
+                        fontSize: 16,
                       ),
+                      textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 10),
 
-                    const Text(
-                      'Select duration:',
-                      style: TextStyle(color: Colors.orangeAccent),
+                    // Duration Selection
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Select duration:',
+                        style: TextStyle(color: Colors.orangeAccent),
+                      ),
                     ),
                     const SizedBox(height: 6),
-
                     Wrap(
                       spacing: 10,
                       children: [
@@ -135,9 +143,9 @@ class _SellerScreenState extends State<SellerScreen> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 10),
 
+                    // Discount Input
                     TextField(
                       controller: discountController,
                       keyboardType: TextInputType.number,
@@ -145,12 +153,15 @@ class _SellerScreenState extends State<SellerScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Discount (%)',
                         labelStyle: TextStyle(color: Colors.orangeAccent),
+                        border: OutlineInputBorder(),
                       ),
                       onChanged: (value) {
                         final val = double.tryParse(value);
-                        discount = (val != null && val >= 0 && val <= 100)
-                            ? val
-                            : 0;
+                        setState(() {
+                          discount = (val != null && val >= 0 && val <= 100)
+                              ? val
+                              : 0;
+                        });
                       },
                     ),
                   ],
@@ -158,8 +169,8 @@ class _SellerScreenState extends State<SellerScreen> {
               );
             },
           ),
-
           actions: [
+            // Cancel Button
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text(
@@ -168,9 +179,19 @@ class _SellerScreenState extends State<SellerScreen> {
               ),
             ),
 
+            // Promote Button
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
               onPressed: () async {
+                if (selectedDuration <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Select a valid duration")),
+                  );
+                  return;
+                }
+
+                Navigator.pop(context); // Close modal before opening WebView
+
                 await _handlePromotionPayment(
                   product: product,
                   duration: selectedDuration,
@@ -185,14 +206,13 @@ class _SellerScreenState extends State<SellerScreen> {
     );
   }
 
-  /// promotion payment via hosted link
+  /// Promotion Payment via WebView
   Future<void> _handlePromotionPayment({
     required Map<String, dynamic> product,
     required int duration,
     required double discount,
   }) async {
-    final user = _auth.currentUser;
-
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(
         context,
@@ -201,7 +221,7 @@ class _SellerScreenState extends State<SellerScreen> {
     }
 
     try {
-      /// 🔥 PRICE LOGIC
+      // Determine amount
       final int amount = duration == 1
           ? 1500
           : duration == 3
@@ -210,22 +230,13 @@ class _SellerScreenState extends State<SellerScreen> {
 
       final txRef = "PROMO_${DateTime.now().millisecondsSinceEpoch}";
 
-      /// ✅ SAFE ENV ACCESS (NO CRASH)
-      String? backendUrl;
-
-      try {
-        backendUrl = dotenv.env['BACKEND_URL'];
-      } catch (e) {
-        print("❌ Dotenv not initialized: $e");
-      }
-
-      /// 🔥 FALLBACK (VERY IMPORTANT)
-      backendUrl ??= "http://10.223.5.186"; // ← CHANGE THIS
-
-      print("🌐 Backend URL: $backendUrl");
+      // Backend URL
+      final backendUrl =
+          dotenv.env['BACKEND_URL'] ??
+          "https://edgebaz-production.up.railway.app";
 
       final response = await http.post(
-        Uri.parse('$backendUrl/promote'), // <-- change /pay to /promote
+        Uri.parse('$backendUrl/promote'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           "amount": amount,
@@ -245,37 +256,56 @@ class _SellerScreenState extends State<SellerScreen> {
       }
 
       final paymentLink = data['data']['link'];
-      print("🔥 PAYMENT LINK: $paymentLink");
+      if (paymentLink == null) throw Exception("Payment link not found");
 
-      /// 🔗 OPEN LINK
-      final uri = Uri.parse(paymentLink);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        throw Exception("Could not launch payment link");
-      }
+      // Open Payment WebView
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PaymentWebView(
+            url: paymentLink,
+            txRef: txRef,
+            onPaymentResult: (status) async {
+              if (status == "success") {
+                await _savePromotion(product, duration, discount);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Promotion activated successfully ✅"),
+                  ),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Payment failed or cancelled ❌"),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      );
     } catch (e) {
       print("❌ ERROR: $e");
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("❌ ERROR: $e")));
     }
   }
 
-  /// saving promotion locally (optional if backend handles it)
+  /// Save promotion to Firestore
   Future<void> _savePromotion(
     Map<String, dynamic> product,
     int duration,
     double discount,
   ) async {
-    final user = _auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     final startDate = DateTime.now();
     final endDate = startDate.add(Duration(days: duration));
 
-    await _firestore.collection('promoted_products').add({
+    await FirebaseFirestore.instance.collection('promoted_products').add({
       'productId': product['id'],
       'sellerId': user.uid,
       'title': product['title'],
@@ -469,6 +499,18 @@ class _SellerScreenState extends State<SellerScreen> {
           MaterialPageRoute(builder: (_) => const VerifyLocationScreen()),
         );
 
+        break;
+
+      case "money box":
+        if (!mounted) return; // Ensure widget is still in the tree
+
+        if (result == "success") {
+          // Replace current screen (PaymentScreen) with WalletScreen
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => WalletScreen()),
+          );
+        }
         break;
 
       case "Store link":
@@ -1068,6 +1110,7 @@ class _SellerScreenState extends State<SellerScreen> {
                           children: [
                             _menuItem("Verify account number"),
                             _menuItem("Verify Location"),
+                            _menuItem("Money box"),
                             _menuItem("Edit my seller account"),
                             _menuItem("Store link"),
                             _menuItem("Logout"),

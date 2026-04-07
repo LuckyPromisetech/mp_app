@@ -1,13 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../provider/cart_provider.dart';
+import 'payment_webview_screen.dart';
 
 class PaymentScreen extends StatefulWidget {
   final String deliveryAddress;
@@ -33,59 +32,116 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _isLoading = false;
   String paymentType = "full";
 
+  // Calculate amounts
   double getPayNowAmount(double items, double delivery) =>
       paymentType == "half" ? (items / 2) + delivery : items + delivery;
 
   double getPayLaterAmount(double items) =>
       paymentType == "half" ? items / 2 : 0;
 
-  Future<void> payWithHostedLink(double amount) async {
+  Future<void> payWithWebView(double amount) async {
     setState(() => _isLoading = true);
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception("User not logged in");
+      if (user == null) throw Exception("Please log in to continue");
 
-      String backendUrl =
+      final backendUrl =
           dotenv.env['BACKEND_URL'] ??
           "https://edgebaz-production.up.railway.app";
 
-      final txRef = "TX_${DateTime.now().millisecondsSinceEpoch}";
+      final payUrl = backendUrl.endsWith('/')
+          ? '${backendUrl}pay'
+          : '$backendUrl/pay';
+      print("💻 Hitting payment URL: $payUrl");
+
+      final cartProvider = Provider.of<CartProvider>(context, listen: false);
+      final productIds = cartProvider.items
+          .map((item) => item.product.id)
+          .toList();
+
+      final body = {
+        "amount": amount,
+        "email": user.email ?? "user@example.com",
+        "phone": widget.buyerPhone,
+        "buyerName": widget.buyerName,
+        "type": "normal",
+        "productId": productIds,
+        "paymentOption": paymentType,
+        "deliveryAddress": widget.deliveryAddress,
+        "buyerState": widget.buyerstate,
+      };
 
       final response = await http.post(
-        Uri.parse('$backendUrl/promote'),
+        Uri.parse(payUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "amount": amount,
-          "email": user.email ?? "user@example.com",
-          "tx_ref": txRef,
-          "phone": widget.buyerPhone,
-          "buyerName": widget.buyerName,
-        }),
+        body: jsonEncode(body),
       );
 
-      final data = jsonDecode(response.body);
+      print("💻 Response: ${response.statusCode} ${response.body}");
 
-      if (data['status'] == 'success' && data['data'] != null) {
-        final link = data['data']['link'];
-        final uri = Uri.parse(link);
-
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw Exception("Could not launch payment link");
-        }
-      } else {
-        throw Exception(data['message'] ?? "Failed to create payment link ❌");
+      if (response.statusCode != 200) {
+        throw Exception("Server error: ${response.statusCode}");
       }
+
+      final data = jsonDecode(response.body);
+      if (data['status'] != 'success') {
+        throw Exception(data['message'] ?? "Payment failed");
+      }
+
+      final paymentLink = data['data']?['link'] ?? data['link'];
+      final txRef =
+          data['tx_ref'] ?? "TX_${DateTime.now().millisecondsSinceEpoch}";
+      if (paymentLink == null) throw Exception("No payment link returned");
+
+      // Open payment in WebView
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PaymentWebView(
+            url: paymentLink,
+            txRef: txRef,
+            onPaymentResult: (status) async {
+              if (status == "success") {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Payment successful! ✅")),
+                );
+
+                // Verify payment with backend
+                final verifyUrl = backendUrl.endsWith('/')
+                    ? '${backendUrl}verify-payment?tx_ref=$txRef'
+                    : '$backendUrl/verify-payment?tx_ref=$txRef';
+
+                final verifyResponse = await http.get(
+                  Uri.parse(verifyUrl),
+                  headers: {'Content-Type': 'application/json'},
+                );
+
+                if (verifyResponse.statusCode == 200) {
+                  final verifyData = jsonDecode(verifyResponse.body);
+                  print("✅ Payment verification result: $verifyData");
+                } else {
+                  print("❌ Verification failed: ${verifyResponse.statusCode}");
+                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Payment failed or cancelled ❌"),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      );
     } catch (e) {
       print("❌ ERROR: $e");
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      ).showSnackBar(SnackBar(content: Text("❌ ERROR: $e")));
+    } finally {
+      setState(() => _isLoading = false);
     }
-
-    setState(() => _isLoading = false);
   }
 
   @override
@@ -97,9 +153,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     for (var item in cartProvider.items) {
       final discount = item.product.discount ?? 0;
-      final effectivePrice =
-          item.product.price * (1 - (discount.toDouble() / 100));
-
+      final effectivePrice = item.product.price * (1 - discount / 100);
       itemsCost += effectivePrice * item.quantity;
       deliveryCost += item.deliveryPrice * item.quantity;
     }
@@ -120,7 +174,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // ITEMS
+                  // Items List
                   Expanded(
                     child: ListView.builder(
                       itemCount: cartProvider.items.length,
@@ -128,8 +182,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                         final item = cartProvider.items[index];
                         final discount = item.product.discount ?? 0;
                         final effectivePrice =
-                            item.product.price *
-                            (1 - (discount.toDouble() / 100));
+                            item.product.price * (1 - discount / 100);
 
                         return Card(
                           color: const Color(0xFF0A1D37),
@@ -163,7 +216,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   const SizedBox(height: 10),
 
-                  // ADDRESS + BUYER INFO
+                  // Buyer Info
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
@@ -184,7 +237,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   const SizedBox(height: 16),
 
-                  // PAYMENT TYPE
+                  // Payment Type Selection
                   Row(
                     children: [
                       Expanded(
@@ -192,7 +245,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                           value: "full",
                           groupValue: paymentType,
                           onChanged: (value) =>
-                              setState(() => paymentType = value.toString()),
+                              setState(() => paymentType = value!),
                           title: const Text(
                             "Full Payment",
                             style: TextStyle(color: Colors.white),
@@ -204,7 +257,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                           value: "half",
                           groupValue: paymentType,
                           onChanged: (value) =>
-                              setState(() => paymentType = value.toString()),
+                              setState(() => paymentType = value!),
                           title: const Text(
                             "Half Payment",
                             style: TextStyle(color: Colors.white),
@@ -214,7 +267,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ],
                   ),
 
-                  // BREAKDOWN
+                  // Payment Breakdown
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -234,7 +287,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   const SizedBox(height: 16),
 
-                  // PAY BUTTON
+                  // Pay Button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -244,7 +297,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       ),
                       onPressed: _isLoading
                           ? null
-                          : () => payWithHostedLink(payNow),
+                          : () => payWithWebView(payNow),
                       child: _isLoading
                           ? const CircularProgressIndicator(
                               color: Colors.orange,

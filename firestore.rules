@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================
+    // USERS
+    // =========================
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+
+      // Subcollections (like watchlist)
+      match /{subCollection}/{docId} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+    }
+
+    // =========================
+    // SELLERS
+    // =========================
+    match /sellers/{sellerId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == sellerId;
+    }
+
+    // =========================
+    // PRODUCTS
+    // =========================
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.sellerId;
+      allow update: if request.auth != null
+                    && request.auth.uid == resource.data.sellerId;
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.sellerId;
+    }
+
+    // =========================
+    // PROMOTED PRODUCTS
+    // =========================
+    match /promoted_products/{promoId} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.sellerId;
+      allow update, delete: if request.auth != null
+                            && request.auth.uid == resource.data.sellerId;
+    }
+
+    // =========================
+    // CATEGORIES
+    // =========================
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // =========================
+    // CART
+    // =========================
+    match /cart/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+    }
+
+    // =========================
+    // ORDERS (ALL USERS CAN READ/WRITE)
+    // =========================
+    match /orders/{orderId} {
+
+      // Buyer creates their own order
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.buyerId;
+
+      // ANY logged-in user can read or update any order
+      allow read, update: if request.auth != null;
+
+      // No one can delete
+      allow delete: if false;
+
+      // Order items subcollection
+      match /order_items/{itemId} {
+
+        // Buyer can create items
+        allow create: if request.auth != null
+                      && request.auth.uid ==
+                         get(/databases/$(database)/documents/orders/$(orderId)).data.buyerId;
+
+        // ANY logged-in user can read items
+        allow read: if request.auth != null;
+
+        // No updates/deletes allowed
+        allow update, delete: if false;
+      }
+    }
+
+    // =========================
+    // STATES (FOR DELIVERY)
+    // =========================
+    match /states/{stateId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
