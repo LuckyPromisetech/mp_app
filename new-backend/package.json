@@ -1,12 +1,13 @@
 {
-  "name": "edgebaz-backend",
+  "name": "new-backend",
   "version": "1.0.0",
+  "description": "EdgeBaz new backend",
   "main": "index.js",
   "scripts": {
-      "start": "node new-backend/index.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.5.0",
+    "axios": "^1.7.6",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^17.4.1",
